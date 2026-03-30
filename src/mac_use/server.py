@@ -1,6 +1,7 @@
 """mac-use: MCP server for controlling macOS apps via Accessibility APIs."""
 
 import json
+import shutil
 import subprocess
 import re
 import datetime
@@ -176,10 +177,19 @@ tell application "System Events"
     tell process "{escaped_app}"
         set frontmost to true
         delay 0.2
-        click {escaped_desc}
+        try
+            click {escaped_desc}
+            return "Clicked: {escaped_desc}"
+        on error
+            try
+                perform action "AXPress" of {escaped_desc}
+                return "Pressed (AXPress): {escaped_desc}"
+            on error errMsg
+                error errMsg
+            end try
+        end try
     end tell
 end tell
-return "Clicked: {escaped_desc}"
 '''
     else:
         # Name search mode
@@ -320,10 +330,33 @@ tell application "System Events"
         if targetField is missing value then
             return "ERROR: No text field found matching: {escaped_field}"
         end if
-        set focused of targetField to true
-        delay 0.1
-        set value of targetField to "{escaped_text}"
-        return "Typed text into field: {escaped_field}"
+        -- Try AXPress first (works for Java Swing), then set value, then keystroke
+        try
+            perform action "AXPress" of targetField
+            delay 0.2
+            keystroke "a" using command down
+            delay 0.1
+            key code 51
+            delay 0.1
+            keystroke "{escaped_text}"
+            return "Typed text into field: {escaped_field}"
+        on error
+            try
+                set focused of targetField to true
+                delay 0.1
+                set value of targetField to "{escaped_text}"
+                return "Typed text into field: {escaped_field}"
+            on error
+                set focused of targetField to true
+                delay 0.2
+                keystroke "a" using command down
+                delay 0.1
+                key code 51
+                delay 0.1
+                keystroke "{escaped_text}"
+                return "Typed text into field (keystroke): {escaped_field}"
+            end try
+        end try
     end tell
 end tell
 '''
@@ -473,8 +506,30 @@ def activate_app(app_name: str) -> str:
 
     Args:
         app_name: The application name (e.g. "Safari", "Finder", "Terminal").
+                  For Java apps, use the process name from list_windows (e.g. "JavaApplicationStub").
     """
     escaped = _escape_applescript_string(app_name)
+    # First try via System Events process (works for Java apps and all processes)
+    try:
+        result = _run_applescript(f'''
+tell application "System Events"
+    set procExists to exists process "{escaped}"
+    if procExists then
+        tell process "{escaped}"
+            set frontmost to true
+        end tell
+        delay 0.3
+        return "Activated via process: {escaped}"
+    end if
+end tell
+return "NOT_FOUND"
+''')
+        if "NOT_FOUND" not in result:
+            return result
+    except RuntimeError:
+        pass
+
+    # Fall back to tell application (works for standard apps)
     script = f'''
 tell application "{escaped}"
     activate
@@ -644,14 +699,35 @@ def screenshot(app_name: str = "", full_screen: bool = False) -> str:
     if full_screen:
         cmd = ["screencapture", "-x", filepath]
     elif app_name:
-        # Activate the app first, then capture the frontmost window
+        # Activate the app first via System Events process (works for Java apps too)
         escaped = _escape_applescript_string(app_name)
-        _run_applescript(f'''
+        try:
+            _run_applescript(f'''
+tell application "System Events"
+    if exists process "{escaped}" then
+        tell process "{escaped}"
+            set frontmost to true
+        end tell
+        delay 0.5
+    else
+        tell application "{escaped}"
+            activate
+        end tell
+        delay 0.5
+    end if
+end tell
+''')
+        except RuntimeError:
+            # Last resort: try tell application
+            try:
+                _run_applescript(f'''
 tell application "{escaped}"
     activate
 end tell
 delay 0.5
 ''')
+            except RuntimeError:
+                pass
         # Try to get the CGWindowID for precise capture
         window_id = _get_window_id(app_name)
         if window_id:
@@ -700,6 +776,70 @@ for (var i = 0; i < windows.length; i++) {{
     except Exception:
         pass
     return None
+
+
+@mcp.tool()
+def click_at(x: int, y: int, click_type: str = "single") -> str:
+    """Click at specific screen coordinates. Essential for Java Swing apps
+    where UI elements are rendered on a canvas and not accessible as
+    individual elements.
+
+    Use get_ui_elements or read_element to find the position of an element,
+    then click at those coordinates.
+
+    Args:
+        x: The x screen coordinate (in points, not pixels).
+        y: The y screen coordinate (in points, not pixels).
+        click_type: "single" for single click, "double" for double click,
+                    "right" for right click. Default is "single".
+    """
+    # Check if cliclick is available
+    cliclick_path = shutil.which("cliclick")
+    if cliclick_path:
+        cmd_map = {"single": "c", "double": "dc", "right": "rc"}
+        cmd = cmd_map.get(click_type, "c")
+        try:
+            result = subprocess.run(
+                [cliclick_path, f"{cmd}:{x},{y}"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return f"Clicked ({click_type}) at ({x}, {y})"
+            # Fall through to AppleScript
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
+    # Fallback: AppleScript click at coordinates
+    if click_type == "double":
+        script = f'''
+tell application "System Events"
+    click at {{{x}, {y}}}
+    delay 0.05
+    click at {{{x}, {y}}}
+end tell
+return "Double-clicked at ({x}, {y})"
+'''
+    elif click_type == "right":
+        # AppleScript doesn't easily do right-click at coords,
+        # use control-click instead
+        script = f'''
+tell application "System Events"
+    key down control
+    click at {{{x}, {y}}}
+    key up control
+end tell
+return "Right-clicked at ({x}, {y})"
+'''
+    else:
+        script = f'''
+tell application "System Events"
+    click at {{{x}, {y}}}
+end tell
+return "Clicked at ({x}, {y})"
+'''
+    return _run_applescript(script)
 
 
 def main():
