@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mac-use"
+version = "0.1.0"
+description = "Control any macOS app from Claude Code via Accessibility APIs"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "entpnomad" },
+]
+keywords = ["mcp", "macos", "accessibility", "automation", "applescript"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Desktop Environment",
+]
+dependencies = [
+    "mcp[cli]",
+]
+
+[project.scripts]
+mac-use = "mac_use.server:main"
+
+[project.urls]
+Homepage = "https://github.com/entpnomad/mac-use"
+Repository = "https://github.com/entpnomad/mac-use"
+Issues = "https://github.com/entpnomad/mac-use/issues"
