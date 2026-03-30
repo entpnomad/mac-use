@@ -27,6 +27,30 @@ Think of it as **Playwright for desktop apps**: precise, fast, and reliable beca
 | **Platform** | macOS only | Cross-platform |
 | **Requirements** | Accessibility permissions | Screen recording permissions |
 
+## Use cases
+
+**Automate legacy and desktop apps that have no API**
+- Fill tax forms in government desktop software (e.g., eTax, ELSTER) -- no API, no CLI, just a GUI
+- Enter data into accounting apps like GnuCash, QuickBooks Desktop, or SAP GUI
+- Configure hardware companion apps (Logitech G Hub, printer utilities) that offer no scripting
+
+**Extract data from apps that trap it**
+- Export your iMessage history, Apple Journal entries, or any app that shows data on screen but has no export button
+- Pull transaction history from banking apps, read values from dashboards in legacy Java apps
+- Read text from apps that block copy-paste
+
+**Cross-app workflow orchestration**
+- Move data between apps: scan a shipping email, extract the tracking number, paste it into your receiving software
+- Automate the copy-paste data entry that people currently do by hand (or [pay freelancers $0.50/task to do](https://reddit.com/r/freelance_forhire/comments/1kxjxgj/hiring_paypertask_050_100_for_2_minute_copypaste/))
+
+**Fill the gap Apple left behind**
+- AppleScript is abandoned, Automator is deprecated, Shortcuts is limited on Mac -- mac-use works with any app via the Accessibility API layer that Apple actively maintains for disability compliance
+- No need for apps to expose Shortcuts actions or AppleScript dictionaries
+
+**QA and accessibility testing**
+- Test native macOS apps: click through flows, verify element states, catch regressions
+- Audit accessibility -- use `get_ui_elements` to check if buttons and fields have proper labels
+
 ## Quick start
 
 ### Install with pip (recommended)
