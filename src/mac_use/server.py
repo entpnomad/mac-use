@@ -14,6 +14,9 @@ mcp = FastMCP(
     instructions="Control any macOS app via Accessibility APIs (System Events / AppleScript)",
 )
 
+# Track which app was last activated to skip redundant activations
+_last_frontmost_app: str = ""
+
 
 def _run_applescript(script: str, timeout: int = 30) -> str:
     """Execute an AppleScript via osascript and return stdout."""
@@ -43,6 +46,18 @@ def _run_applescript(script: str, timeout: int = 30) -> str:
 def _escape_applescript_string(s: str) -> str:
     """Escape a string for safe embedding in AppleScript."""
     return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _activate_block(app_name: str) -> str:
+    """Return AppleScript to activate an app, skipping if already frontmost."""
+    global _last_frontmost_app
+    escaped = _escape_applescript_string(app_name)
+    if app_name == _last_frontmost_app:
+        return ""
+    _last_frontmost_app = app_name
+    return f'''        set frontmost to true
+        delay 0.1
+'''
 
 
 @mcp.tool()
@@ -101,7 +116,12 @@ end tell
 
 
 @mcp.tool()
-def get_ui_elements(app_name: str, window_index: int = 1, max_depth: int = 5) -> str:
+def get_ui_elements(
+    app_name: str,
+    window_index: int = 1,
+    max_depth: int = 5,
+    filter_roles: str = "",
+) -> str:
     """Get the UI element tree of a specific application window.
 
     Reads the Accessibility hierarchy and returns a structured list of
@@ -112,42 +132,109 @@ def get_ui_elements(app_name: str, window_index: int = 1, max_depth: int = 5) ->
         app_name: The process name as shown by list_windows (e.g. "Safari", "Finder").
         window_index: Which window to inspect (1-based, default 1).
         max_depth: How many levels deep to traverse the UI tree (default 5).
+        filter_roles: Comma-separated AX roles to include (e.g. "AXTextField,AXButton,AXCheckBox").
+                      If empty, returns all elements. Use this to dramatically speed up
+                      queries on complex apps by only returning what you need.
     """
     escaped = _escape_applescript_string(app_name)
-    script = f'''
+    activate = _activate_block(app_name)
+
+    if filter_roles:
+        # Filtered walk: much faster for complex apps
+        roles = [r.strip() for r in filter_roles.split(",")]
+        role_checks = " or ".join(
+            f'elemRole is "{_escape_applescript_string(r)}"' for r in roles
+        )
+        script = f'''
+on walkTree(parentElem, depth, maxD, appName)
+    if depth > maxD then return ""
+    set output to ""
+    try
+        set children to UI elements of parentElem
+    on error
+        return ""
+    end try
+    repeat with uiElem in children
+        try
+            set elemRole to role of uiElem as text
+            if {role_checks} then
+                set elemName to ""
+                try
+                    set elemName to name of uiElem
+                end try
+                set elemVal to ""
+                try
+                    set elemVal to value of uiElem as text
+                end try
+                set elemDesc to ""
+                try
+                    set elemDesc to description of uiElem
+                end try
+                set output to output & elemRole & "\\t" & elemName & "\\t" & elemVal & "\\t" & elemDesc & "\\n"
+            end if
+        end try
+        set output to output & my walkTree(uiElem, depth + 1, maxD, appName)
+    end repeat
+    return output
+end walkTree
+
 tell application "System Events"
     tell process "{escaped}"
-        set frontmost to true
-        delay 0.2
-        get entire contents of window {window_index}
+{activate}        set output to my walkTree(window {window_index}, 0, {max_depth}, "{escaped}")
+        return output
     end tell
 end tell
 '''
-    raw = _run_applescript(script, timeout=60)
-    if not raw:
-        return f"No UI elements found for '{app_name}' window {window_index}."
+        raw = _run_applescript(script, timeout=60)
+        if not raw:
+            return f"No matching elements found for '{app_name}' window {window_index}."
 
-    # Parse the raw "entire contents" output into a readable format
-    elements = []
-    for item in raw.split(", "):
-        item = item.strip()
-        if not item:
-            continue
-        # Extract element type and path
-        # Format: "button Save of group 1 of window 1 of application process Finder"
-        # Remove the trailing "of application process ..." part
-        proc_suffix = f"of application process {app_name}"
-        clean = item.replace(proc_suffix, "").strip()
-        if clean:
-            elements.append(clean)
+        lines = [l for l in raw.split("\n") if l.strip()]
+        elements = []
+        for line in lines:
+            parts = line.split("\t")
+            if len(parts) >= 4:
+                role, name, value, desc = parts[0], parts[1], parts[2], parts[3]
+                entry = role
+                if name:
+                    entry += f' "{name}"'
+                if value:
+                    entry += f" = {value}"
+                if desc and desc != name:
+                    entry += f" ({desc})"
+                elements.append(entry)
 
-    # Limit output to avoid overwhelming context
-    max_elements = max_depth * 100
-    if len(elements) > max_elements:
-        elements = elements[:max_elements]
-        elements.append(f"... ({len(elements)} elements shown, increase max_depth for more)")
+        return "\n".join(elements)
 
-    return "\n".join(elements)
+    else:
+        # Unfiltered: use entire contents (slower but complete)
+        script = f'''
+tell application "System Events"
+    tell process "{escaped}"
+{activate}        get entire contents of window {window_index}
+    end tell
+end tell
+'''
+        raw = _run_applescript(script, timeout=60)
+        if not raw:
+            return f"No UI elements found for '{app_name}' window {window_index}."
+
+        elements = []
+        for item in raw.split(", "):
+            item = item.strip()
+            if not item:
+                continue
+            proc_suffix = f"of application process {app_name}"
+            clean = item.replace(proc_suffix, "").strip()
+            if clean:
+                elements.append(clean)
+
+        max_elements = max_depth * 100
+        if len(elements) > max_elements:
+            elements = elements[:max_elements]
+            elements.append(f"... ({len(elements)} elements shown, increase max_depth for more)")
+
+        return "\n".join(elements)
 
 
 @mcp.tool()
@@ -165,6 +252,7 @@ def click_element(app_name: str, element_description: str) -> str:
         element_description: Either an AppleScript path or a search string (optionally prefixed with type, e.g. "button:Save").
     """
     escaped_app = _escape_applescript_string(app_name)
+    activate = _activate_block(app_name)
 
     # Determine if this looks like an AppleScript path or a name search
     is_path = bool(re.match(r"^(button|text field|checkbox|radio button|group|scroll|tab|menu|pop up|combo|static text|image|slider|splitter|table|row|column|outline|UI element|toolbar)\s+\d+", element_description, re.IGNORECASE))
@@ -175,9 +263,7 @@ def click_element(app_name: str, element_description: str) -> str:
         script = f'''
 tell application "System Events"
     tell process "{escaped_app}"
-        set frontmost to true
-        delay 0.2
-        try
+{activate}        try
             click {escaped_desc}
             return "Clicked: {escaped_desc}"
         on error
@@ -258,9 +344,7 @@ end findAndClick
 
 tell application "System Events"
     tell process "{escaped_app}"
-        set frontmost to true
-        delay 0.2
-        if my findAndClick(window 1, "{escaped_name}", 0) then
+{activate}        if my findAndClick(window 1, "{escaped_name}", 0) then
             return "Clicked element matching: {escaped_name}"
         else
             return "ERROR: No element found matching: {escaped_name}"
@@ -287,6 +371,7 @@ def type_text(app_name: str, text: str, field_name: str = "") -> str:
     """
     escaped_app = _escape_applescript_string(app_name)
     escaped_text = _escape_applescript_string(text)
+    activate = _activate_block(app_name)
 
     if field_name:
         escaped_field = _escape_applescript_string(field_name)
@@ -324,35 +409,30 @@ end findField
 
 tell application "System Events"
     tell process "{escaped_app}"
-        set frontmost to true
-        delay 0.2
-        set targetField to my findField(window 1, "{escaped_field}", 0)
+{activate}        set targetField to my findField(window 1, "{escaped_field}", 0)
         if targetField is missing value then
             return "ERROR: No text field found matching: {escaped_field}"
         end if
-        -- Try AXPress first (works for Java Swing), then set value, then keystroke
+        -- Try set value first (fastest, no delays needed), fall back to keystroke
         try
-            perform action "AXPress" of targetField
-            delay 0.2
-            keystroke "a" using command down
-            delay 0.1
-            key code 51
-            delay 0.1
-            keystroke "{escaped_text}"
+            set focused of targetField to true
+            set value of targetField to "{escaped_text}"
             return "Typed text into field: {escaped_field}"
         on error
             try
-                set focused of targetField to true
+                perform action "AXPress" of targetField
                 delay 0.1
-                set value of targetField to "{escaped_text}"
+                keystroke "a" using command down
+                key code 51
+                delay 0.05
+                keystroke "{escaped_text}"
                 return "Typed text into field: {escaped_field}"
             on error
                 set focused of targetField to true
-                delay 0.2
+                delay 0.1
                 keystroke "a" using command down
-                delay 0.1
                 key code 51
-                delay 0.1
+                delay 0.05
                 keystroke "{escaped_text}"
                 return "Typed text into field (keystroke): {escaped_field}"
             end try
@@ -364,9 +444,7 @@ end tell
         script = f'''
 tell application "System Events"
     tell process "{escaped_app}"
-        set frontmost to true
-        delay 0.1
-        keystroke "{escaped_text}"
+{activate}        keystroke "{escaped_text}"
     end tell
 end tell
 return "Typed text into focused field"
@@ -387,6 +465,7 @@ def read_element(app_name: str, element_description: str) -> str:
                              or a search string (e.g. "Search" to find by name).
     """
     escaped_app = _escape_applescript_string(app_name)
+    activate = _activate_block(app_name)
 
     is_path = " of " in element_description or bool(
         re.match(r"^(button|text field|checkbox|radio button|group|static text|UI element|image|slider|pop up|combo|text area)\s+\d+", element_description, re.IGNORECASE)
@@ -397,9 +476,7 @@ def read_element(app_name: str, element_description: str) -> str:
         script = f'''
 tell application "System Events"
     tell process "{escaped_app}"
-        set frontmost to true
-        delay 0.2
-        set elem to {escaped_desc}
+{activate}        set elem to {escaped_desc}
         set output to ""
         try
             set output to output & "role: " & (role of elem) & "\\n"
@@ -464,9 +541,7 @@ end findElement
 
 tell application "System Events"
     tell process "{escaped_app}"
-        set frontmost to true
-        delay 0.2
-        set elem to my findElement(window 1, "{escaped_name}", 0)
+{activate}        set elem to my findElement(window 1, "{escaped_name}", 0)
         if elem is missing value then
             return "ERROR: No element found matching: {escaped_name}"
         end if
@@ -508,6 +583,7 @@ def activate_app(app_name: str) -> str:
         app_name: The application name (e.g. "Safari", "Finder", "Terminal").
                   For Java apps, use the process name from list_windows (e.g. "JavaApplicationStub").
     """
+    global _last_frontmost_app
     escaped = _escape_applescript_string(app_name)
     # First try via System Events process (works for Java apps and all processes)
     try:
@@ -525,6 +601,7 @@ end tell
 return "NOT_FOUND"
 ''')
         if "NOT_FOUND" not in result:
+            _last_frontmost_app = app_name
             return result
     except RuntimeError:
         pass
@@ -534,9 +611,10 @@ return "NOT_FOUND"
 tell application "{escaped}"
     activate
 end tell
-delay 0.3
+delay 0.15
 return "Activated: {escaped}"
 '''
+    _last_frontmost_app = app_name
     return _run_applescript(script)
 
 
@@ -651,30 +729,23 @@ def menu_action(app_name: str, menu_path: str) -> str:
         menu_path: Menu path separated by " > " (e.g. "File > Save", "Edit > Find > Find...").
     """
     escaped_app = _escape_applescript_string(app_name)
+    activate = _activate_block(app_name)
     parts = [p.strip() for p in menu_path.split(">")]
 
     if len(parts) < 2:
         return "ERROR: menu_path must have at least two parts (e.g. 'File > Save')"
 
-    # Build the AppleScript navigation chain
-    # menu bar 1 > menu bar item "File" > menu "File" > menu item "Save"
-    # For submenus: ... > menu item "Find" > menu "Find" > menu item "Find..."
     nav = 'menu bar item "' + _escape_applescript_string(parts[0]) + '" of menu bar 1'
 
     for i, part in enumerate(parts[1:], 1):
         escaped_part = _escape_applescript_string(part)
         parent_escaped = _escape_applescript_string(parts[i - 1])
-        if i == 1:
-            nav = f'menu item "{escaped_part}" of menu "{parent_escaped}" of {nav}'
-        else:
-            nav = f'menu item "{escaped_part}" of menu "{parent_escaped}" of {nav}'
+        nav = f'menu item "{escaped_part}" of menu "{parent_escaped}" of {nav}'
 
     script = f'''
 tell application "System Events"
     tell process "{escaped_app}"
-        set frontmost to true
-        delay 0.15
-        click {nav}
+{activate}        click {nav}
     end tell
 end tell
 return "Clicked menu: {_escape_applescript_string(menu_path)}"
@@ -699,44 +770,58 @@ def screenshot(app_name: str = "", full_screen: bool = False) -> str:
     if full_screen:
         cmd = ["screencapture", "-x", filepath]
     elif app_name:
-        # Activate the app first via System Events process (works for Java apps too)
         escaped = _escape_applescript_string(app_name)
+        # Combined: activate app and get window ID in a single JXA call
+        window_id = None
         try:
-            _run_applescript(f'''
+            jxa_script = f'''
+ObjC.import("CoreGraphics");
+var app = Application("System Events");
+var procs = app.processes.whose({{name: "{escaped}"}});
+if (procs.length > 0) {{
+    procs[0].frontmost = true;
+    delay(0.15);
+}}
+var windows = ObjC.deepUnwrap(
+    $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, $.kCGNullWindowID)
+);
+var wid = "";
+for (var i = 0; i < windows.length; i++) {{
+    if (windows[i].kCGWindowOwnerName === "{escaped}") {{
+        wid = String(windows[i].kCGWindowNumber);
+        break;
+    }}
+}}
+wid;
+'''
+            result = subprocess.run(
+                ["osascript", "-l", "JavaScript", "-e", jxa_script],
+                capture_output=True, text=True, timeout=10,
+            )
+            wid = result.stdout.strip()
+            if wid and wid.isdigit():
+                window_id = wid
+        except Exception:
+            # Fallback: activate via AppleScript
+            try:
+                _run_applescript(f'''
 tell application "System Events"
     if exists process "{escaped}" then
         tell process "{escaped}"
             set frontmost to true
         end tell
-        delay 0.5
-    else
-        tell application "{escaped}"
-            activate
-        end tell
-        delay 0.5
+        delay 0.15
     end if
 end tell
 ''')
-        except RuntimeError:
-            # Last resort: try tell application
-            try:
-                _run_applescript(f'''
-tell application "{escaped}"
-    activate
-end tell
-delay 0.5
-''')
             except RuntimeError:
                 pass
-        # Try to get the CGWindowID for precise capture
-        window_id = _get_window_id(app_name)
+
         if window_id:
             cmd = ["screencapture", "-x", "-l", window_id, filepath]
         else:
-            # Fallback: capture the frontmost window
             cmd = ["screencapture", "-x", "-o", filepath]
     else:
-        # Capture the frontmost window
         cmd = ["screencapture", "-x", "-o", filepath]
 
     try:
@@ -750,39 +835,11 @@ delay 0.5
         return "ERROR: Screenshot file was not created. screencapture may have been cancelled."
 
 
-def _get_window_id(app_name: str) -> str | None:
-    """Get the Core Graphics window ID for the frontmost window of an app."""
-    try:
-        # Use JXA (JavaScript for Automation) to access CGWindowListCopyWindowInfo
-        jxa_script = f'''
-ObjC.import("CoreGraphics");
-var windows = ObjC.deepUnwrap(
-    $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, $.kCGNullWindowID)
-);
-for (var i = 0; i < windows.length; i++) {{
-    if (windows[i].kCGWindowOwnerName === "{_escape_applescript_string(app_name)}") {{
-        windows[i].kCGWindowNumber;
-        break;
-    }}
-}}
-'''
-        result = subprocess.run(
-            ["osascript", "-l", "JavaScript", "-e", jxa_script],
-            capture_output=True, text=True, timeout=5,
-        )
-        wid = result.stdout.strip()
-        if wid and wid.isdigit():
-            return wid
-    except Exception:
-        pass
-    return None
-
-
 @mcp.tool()
 def fill_form(app_name: str, fields: dict[str, str], window_index: int = 1) -> str:
     """Fill multiple form fields in a single call. Much faster than calling
-    type_text repeatedly, because all fields are filled in one AppleScript
-    execution instead of one round-trip per field.
+    type_text repeatedly, because all fields are found in one tree walk and
+    filled in one AppleScript execution.
 
     Args:
         app_name: The process name (e.g. "JavaApplicationStub", "Safari").
@@ -791,52 +848,30 @@ def fill_form(app_name: str, fields: dict[str, str], window_index: int = 1) -> s
         window_index: Which window to target (1-based, default 1).
     """
     escaped_app = _escape_applescript_string(app_name)
+    activate = _activate_block(app_name)
 
-    # Build AppleScript that searches for each field and fills it
-    field_blocks = []
-    for field_name, field_value in fields.items():
+    # Build parallel lists for field names and values
+    field_names_as = "{"
+    field_values_as = "{"
+    for i, (field_name, field_value) in enumerate(fields.items()):
         escaped_name = _escape_applescript_string(field_name)
         escaped_value = _escape_applescript_string(field_value)
-        field_blocks.append(f'''
-        set targetField to my findField(win, "{escaped_name}", 0)
-        if targetField is not missing value then
-            try
-                perform action "AXPress" of targetField
-                delay 0.1
-                keystroke "a" using command down
-                delay 0.05
-                key code 51
-                delay 0.05
-                keystroke "{escaped_value}"
-                set successCount to successCount + 1
-                set output to output & "OK: {escaped_name}" & "\\n"
-            on error
-                try
-                    set focused of targetField to true
-                    delay 0.05
-                    set value of targetField to "{escaped_value}"
-                    set successCount to successCount + 1
-                    set output to output & "OK: {escaped_name}" & "\\n"
-                on error errMsg
-                    set failCount to failCount + 1
-                    set output to output & "FAIL: {escaped_name} - " & errMsg & "\\n"
-                end try
-            end try
-        else
-            set failCount to failCount + 1
-            set output to output & "NOT FOUND: {escaped_name}" & "\\n"
-        end if
-''')
+        if i > 0:
+            field_names_as += ", "
+            field_values_as += ", "
+        field_names_as += f'"{escaped_name}"'
+        field_values_as += f'"{escaped_value}"'
+    field_names_as += "}"
+    field_values_as += "}"
 
-    all_fields = "\n".join(field_blocks)
-
+    # Single tree walk: collect all matching fields, then fill them
     script = f'''
-on findField(parentElem, searchName, depth)
-    if depth > 8 then return missing value
+on collectFields(parentElem, fieldNames, depth, resultList)
+    if depth > 8 then return resultList
     try
         set children to UI elements of parentElem
     on error
-        return missing value
+        return resultList
     end try
     repeat with uiElem in children
         try
@@ -851,26 +886,68 @@ on findField(parentElem, searchName, depth)
                         set elemName to description of uiElem
                     end try
                 end if
-                if elemName contains searchName then
-                    return uiElem
-                end if
+                repeat with i from 1 to count of fieldNames
+                    if elemName contains item i of fieldNames then
+                        set end of resultList to {{uiElem, i}}
+                    end if
+                end repeat
             end if
         end try
-        set found to my findField(uiElem, searchName, depth + 1)
-        if found is not missing value then return found
+        set resultList to my collectFields(uiElem, fieldNames, depth + 1, resultList)
     end repeat
-    return missing value
-end findField
+    return resultList
+end collectFields
 
 tell application "System Events"
     tell process "{escaped_app}"
-        set frontmost to true
-        delay 0.2
-        set win to window {window_index}
+{activate}        set win to window {window_index}
+        set fieldNames to {field_names_as}
+        set fieldValues to {field_values_as}
         set output to ""
         set successCount to 0
         set failCount to 0
-{all_fields}
+
+        -- Single tree walk to find all fields
+        set foundFields to my collectFields(win, fieldNames, 0, {{}})
+
+        -- Track which field names were found
+        set foundIndices to {{}}
+        repeat with pair in foundFields
+            set elem to item 1 of pair
+            set idx to item 2 of pair
+            set targetValue to item idx of fieldValues
+            set targetName to item idx of fieldNames
+            try
+                set focused of elem to true
+                set value of elem to targetValue
+                set successCount to successCount + 1
+                set output to output & "OK: " & targetName & "\\n"
+            on error
+                try
+                    perform action "AXPress" of elem
+                    delay 0.05
+                    keystroke "a" using command down
+                    key code 51
+                    delay 0.05
+                    keystroke targetValue
+                    set successCount to successCount + 1
+                    set output to output & "OK: " & targetName & "\\n"
+                on error errMsg
+                    set failCount to failCount + 1
+                    set output to output & "FAIL: " & targetName & " - " & errMsg & "\\n"
+                end try
+            end try
+            set end of foundIndices to idx
+        end repeat
+
+        -- Report fields not found
+        repeat with i from 1 to count of fieldNames
+            if foundIndices does not contain i then
+                set failCount to failCount + 1
+                set output to output & "NOT FOUND: " & item i of fieldNames & "\\n"
+            end if
+        end repeat
+
         set output to output & "\\nFilled " & successCount & " of " & (successCount + failCount) & " fields."
         return output
     end tell
@@ -923,8 +1000,6 @@ end tell
 return "Double-clicked at ({x}, {y})"
 '''
     elif click_type == "right":
-        # AppleScript doesn't easily do right-click at coords,
-        # use control-click instead
         script = f'''
 tell application "System Events"
     key down control

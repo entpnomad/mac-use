@@ -123,7 +123,10 @@ Get the full UI element tree of an application window. Returns element types, na
 ```
 get_ui_elements(app_name="Safari")
 get_ui_elements(app_name="Finder", window_index=2, max_depth=3)
+get_ui_elements(app_name="JavaApplicationStub", filter_roles="AXTextField,AXButton,AXCheckBox")
 ```
+
+Use `filter_roles` to only return specific element types -- dramatically faster on complex apps like Java Swing, where a full tree dump can take 10-30 seconds.
 
 ### click_element
 
