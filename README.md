@@ -27,29 +27,30 @@ Think of it as **Playwright for desktop apps**: precise, fast, and reliable beca
 | **Platform** | macOS only | Cross-platform |
 | **Requirements** | Accessibility permissions | Screen recording permissions |
 
-## Use cases
+## Why mac-use?
 
-**Automate legacy and desktop apps that have no API**
-- Fill tax forms in government desktop software (e.g., eTax, ELSTER) -- no API, no CLI, just a GUI
-- Enter data into accounting apps like GnuCash, QuickBooks Desktop, or SAP GUI
-- Configure hardware companion apps (Logitech G Hub, printer utilities) that offer no scripting
+**Your desktop job is full of repetitive tasks that shouldn't require a human.**
 
-**Extract data from apps that trap it**
-- Export your iMessage history, Apple Journal entries, or any app that shows data on screen but has no export button
-- Pull transaction history from banking apps, read values from dashboards in legacy Java apps
-- Read text from apps that block copy-paste
+An office worker [automated their admin work and it went viral](https://reddit.com/r/BestofRedditorUpdates/comments/1s23k0o/facing_disciplinary_investigation_sack_for/) (2,300+ upvotes) -- because everyone recognized the pain. Filling forms, copying data between apps, clicking through the same screens dozens of times a day. In healthcare, this problem is so severe it has a name: ["Death by 1,000 Clicks"](https://reddit.com/r/programming/comments/bcr3g5/bad_software_can_kill_death_by_1000_clicks_where/) (1,900+ upvotes on r/programming) -- doctors spending more time clicking through EHR software than treating patients, with bad UI literally causing medical errors.
 
-**Cross-app workflow orchestration**
-- Move data between apps: scan a shipping email, extract the tracking number, paste it into your receiving software
-- Automate the copy-paste data entry that people currently do by hand (or [pay freelancers $0.50/task to do](https://reddit.com/r/freelance_forhire/comments/1kxjxgj/hiring_paypertask_050_100_for_2_minute_copypaste/))
+These apps have no API. No CLI. No export. Just a GUI that someone has to sit in front of and click through. Until now.
 
-**Fill the gap Apple left behind**
-- AppleScript is abandoned, Automator is deprecated, Shortcuts is limited on Mac -- mac-use works with any app via the Accessibility API layer that Apple actively maintains for disability compliance
-- No need for apps to expose Shortcuts actions or AppleScript dictionaries
+mac-use lets an AI agent drive any macOS application the same way a human would -- but faster, without errors, and 24/7. If you can see it on screen, mac-use can read it, click it, and type into it.
 
-**QA and accessibility testing**
-- Test native macOS apps: click through flows, verify element states, catch regressions
-- Audit accessibility -- use `get_ui_elements` to check if buttons and fields have proper labels
+### What people are automating
+
+- **Government and tax software** -- fill tax returns in desktop apps like eTax or ELSTER that offer no API, no scripting, just forms
+- **Accounting and enterprise apps** -- enter data into GnuCash, QuickBooks Desktop, SAP GUI, or any legacy business software
+- **Data entry across apps** -- move data between apps without copy-paste. Scan a shipping email, extract the tracking number, fill it into your receiving software. There's an entire [freelancer market paying $0.50/task](https://reddit.com/r/freelance_forhire/comments/1kxjxgj/hiring_paypertask_050_100_for_2_minute_copypaste/) for this kind of work (856 applicants)
+- **Data extraction from locked-down apps** -- export your [iMessage history](https://reddit.com/r/applesucks/comments/1s1avhv/you_cannot_export_your_own_imessage_history_in/) that Apple won't let you export, pull transactions from banking apps, read dashboards in legacy Java apps
+- **Hardware and vendor software** -- configure apps like Logitech G Hub that have [terrible UX and no alternative](https://reddit.com/r/LogitechG/comments/1ll327d/why_logitech_g_hub_is_the_worst_software/)
+- **QA and accessibility testing** -- test native macOS apps, verify element states, audit whether buttons have proper labels
+
+### Why not AppleScript or Shortcuts?
+
+Apple [disbanded the AppleScript team](https://reddit.com/r/Automator/comments/1fuwaby/automator_applescript_or_any_other_macos_ideas/). Automator is deprecated. Shortcuts on Mac is [half-baked](https://reddit.com/r/shortcuts/comments/1pxpbd2/finally_dynamic_homekit_control_in_siri_shortcuts/). The entire macOS automation stack is in decay.
+
+mac-use uses the Accessibility API layer that Apple actively maintains (it's required for disability compliance). No need for apps to expose Shortcuts actions or AppleScript dictionaries. If the app has a window, mac-use can control it.
 
 ## Quick start
 
