@@ -10,7 +10,7 @@
 
 mac-use is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that gives AI assistants direct control over any macOS application through the native Accessibility API.
 
-Instead of taking screenshots and guessing where to click based on pixel coordinates, mac-use reads the actual UI element tree of any application using macOS System Events and AppleScript. It knows the names, types, and hierarchy of every button, text field, menu item, checkbox, and label in the target application. It can click elements by name, read their values, type into fields, navigate menus, and press keyboard shortcuts -- all through the structured accessibility interface that macOS provides to assistive technologies.
+Instead of taking screenshots and guessing where to click based on pixel coordinates (like [Anthropic's computer use](https://docs.anthropic.com/en/docs/agents-and-tools/computer-use)), mac-use reads the actual UI element tree of any application using macOS System Events and AppleScript. It knows the names, types, and hierarchy of every button, text field, menu item, checkbox, and label in the target application. It can click elements by name, read their values, type into fields, navigate menus, and press keyboard shortcuts -- all through the structured accessibility interface that macOS provides to assistive technologies.
 
 Think of it as **Playwright for desktop apps**: precise, fast, and reliable because it operates on the real UI structure rather than visual approximation.
 
