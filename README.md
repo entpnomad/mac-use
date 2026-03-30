@@ -29,17 +29,17 @@ Think of it as **Playwright for desktop apps**: precise, fast, and reliable beca
 
 ## Quick start
 
-### Install and run with uvx (recommended)
-
-```bash
-uvx mac-use
-```
-
-### Install with pip
+### Install with pip (recommended)
 
 ```bash
 pip install mac-use
 mac-use
+```
+
+### Or install with uvx
+
+```bash
+uvx mac-use
 ```
 
 ### Configure in Claude Code
@@ -50,20 +50,20 @@ Add to your Claude Code MCP configuration (`~/.claude.json`):
 {
   "mcpServers": {
     "mac-use": {
-      "command": "uvx",
-      "args": ["mac-use"]
+      "command": "mac-use"
     }
   }
 }
 ```
 
-Or if installed with pip:
+If using uvx instead:
 
 ```json
 {
   "mcpServers": {
     "mac-use": {
-      "command": "mac-use"
+      "command": "uvx",
+      "args": ["mac-use"]
     }
   }
 }
