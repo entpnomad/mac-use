@@ -518,7 +518,7 @@ tell application "System Events"
         tell process "{escaped}"
             set frontmost to true
         end tell
-        delay 0.3
+        delay 0.15
         return "Activated via process: {escaped}"
     end if
 end tell
@@ -673,7 +673,7 @@ def menu_action(app_name: str, menu_path: str) -> str:
 tell application "System Events"
     tell process "{escaped_app}"
         set frontmost to true
-        delay 0.3
+        delay 0.15
         click {nav}
     end tell
 end tell
@@ -776,6 +776,107 @@ for (var i = 0; i < windows.length; i++) {{
     except Exception:
         pass
     return None
+
+
+@mcp.tool()
+def fill_form(app_name: str, fields: dict[str, str], window_index: int = 1) -> str:
+    """Fill multiple form fields in a single call. Much faster than calling
+    type_text repeatedly, because all fields are filled in one AppleScript
+    execution instead of one round-trip per field.
+
+    Args:
+        app_name: The process name (e.g. "JavaApplicationStub", "Safari").
+        fields: A dictionary mapping field names to values, e.g.
+                {"First Name": "John", "Last Name": "Doe", "Email": "john@example.com"}.
+        window_index: Which window to target (1-based, default 1).
+    """
+    escaped_app = _escape_applescript_string(app_name)
+
+    # Build AppleScript that searches for each field and fills it
+    field_blocks = []
+    for field_name, field_value in fields.items():
+        escaped_name = _escape_applescript_string(field_name)
+        escaped_value = _escape_applescript_string(field_value)
+        field_blocks.append(f'''
+        set targetField to my findField(win, "{escaped_name}", 0)
+        if targetField is not missing value then
+            try
+                perform action "AXPress" of targetField
+                delay 0.1
+                keystroke "a" using command down
+                delay 0.05
+                key code 51
+                delay 0.05
+                keystroke "{escaped_value}"
+                set successCount to successCount + 1
+                set output to output & "OK: {escaped_name}" & "\\n"
+            on error
+                try
+                    set focused of targetField to true
+                    delay 0.05
+                    set value of targetField to "{escaped_value}"
+                    set successCount to successCount + 1
+                    set output to output & "OK: {escaped_name}" & "\\n"
+                on error errMsg
+                    set failCount to failCount + 1
+                    set output to output & "FAIL: {escaped_name} - " & errMsg & "\\n"
+                end try
+            end try
+        else
+            set failCount to failCount + 1
+            set output to output & "NOT FOUND: {escaped_name}" & "\\n"
+        end if
+''')
+
+    all_fields = "\n".join(field_blocks)
+
+    script = f'''
+on findField(parentElem, searchName, depth)
+    if depth > 8 then return missing value
+    try
+        set children to UI elements of parentElem
+    on error
+        return missing value
+    end try
+    repeat with uiElem in children
+        try
+            set elemRole to role of uiElem
+            if elemRole is "AXTextField" or elemRole is "AXTextArea" or elemRole is "AXComboBox" then
+                set elemName to ""
+                try
+                    set elemName to name of uiElem
+                end try
+                if elemName is "" then
+                    try
+                        set elemName to description of uiElem
+                    end try
+                end if
+                if elemName contains searchName then
+                    return uiElem
+                end if
+            end if
+        end try
+        set found to my findField(uiElem, searchName, depth + 1)
+        if found is not missing value then return found
+    end repeat
+    return missing value
+end findField
+
+tell application "System Events"
+    tell process "{escaped_app}"
+        set frontmost to true
+        delay 0.2
+        set win to window {window_index}
+        set output to ""
+        set successCount to 0
+        set failCount to 0
+{all_fields}
+        set output to output & "\\nFilled " & successCount & " of " & (successCount + failCount) & " fields."
+        return output
+    end tell
+end tell
+'''
+    return _run_applescript(script, timeout=120)
 
 
 @mcp.tool()

@@ -12,7 +12,7 @@ mac-use is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) se
 
 Instead of taking screenshots and guessing where to click based on pixel coordinates (like [Anthropic's computer use](https://docs.anthropic.com/en/docs/agents-and-tools/computer-use)), mac-use reads the actual UI element tree of any application using macOS System Events and AppleScript. It knows the names, types, and hierarchy of every button, text field, menu item, checkbox, and label in the target application. It can click elements by name, read their values, type into fields, navigate menus, and press keyboard shortcuts -- all through the structured accessibility interface that macOS provides to assistive technologies.
 
-Think of it as **Playwright for desktop apps**: precise, fast, and reliable because it operates on the real UI structure rather than visual approximation.
+Think of it as **Playwright for desktop apps**: precise and reliable because it operates on the real UI structure rather than visual approximation.
 
 ## How it compares to Anthropic Computer Use
 
@@ -20,7 +20,7 @@ Think of it as **Playwright for desktop apps**: precise, fast, and reliable beca
 |---|---|---|
 | **UI understanding** | Structured element tree (names, roles, hierarchy) | Screenshots (pixel analysis) |
 | **Element targeting** | By name, role, or path (e.g. "click button Save") | By pixel coordinates (e.g. "click at 340, 520") |
-| **Speed** | Fast -- direct API calls, no image processing | Slow -- requires screenshot capture and vision model |
+| **Speed** | Direct API calls, no image processing | Requires screenshot capture and vision model per action |
 | **Accuracy** | Exact -- elements are identified unambiguously | Approximate -- coordinates can miss, especially after layout changes |
 | **Cost** | Minimal -- text-only tool calls | Expensive -- each action requires a vision model call |
 | **Resolution independence** | Works at any display scale | Sensitive to resolution and scaling |
@@ -35,7 +35,7 @@ An office worker [automated their admin work and it went viral](https://reddit.c
 
 These apps have no API. No CLI. No export. Just a GUI that someone has to sit in front of and click through. Until now.
 
-mac-use lets an AI agent drive any macOS application the same way a human would -- but faster, without errors, and 24/7. If you can see it on screen, mac-use can read it, click it, and type into it.
+mac-use lets an AI agent drive any macOS application the same way a human would -- without errors and 24/7. If you can see it on screen, mac-use can read it, click it, and type into it.
 
 ### What people are automating
 
@@ -187,6 +187,19 @@ Click a menu bar item by path.
 menu_action(app_name="TextEdit", menu_path="File > Save")
 menu_action(app_name="Safari", menu_path="File > New Window")
 menu_action(app_name="Finder", menu_path="Edit > Select All")
+```
+
+### fill_form
+
+Fill multiple form fields in a single call. Instead of one round-trip per field, all fields are filled in one execution -- significantly faster for data entry tasks like tax forms or account creation.
+
+```
+fill_form(app_name="JavaApplicationStub", fields={
+    "First Name": "John",
+    "Last Name": "Doe",
+    "Email": "john@example.com",
+    "Phone": "+1 555 0123"
+})
 ```
 
 ### screenshot
