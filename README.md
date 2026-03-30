@@ -1,5 +1,7 @@
 # mac-use
 
+🌐 [English](README.md) | [Español](README.es.md) | [Français](README.fr.md) | [Italiano](README.it.md)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 **Automate your desktop job. Let AI click, type, and read any macOS app.**
