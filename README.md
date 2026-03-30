@@ -27,11 +27,11 @@ Think of it as **Playwright for desktop apps**: precise, fast, and reliable beca
 | **Platform** | macOS only | Cross-platform |
 | **Requirements** | Accessibility permissions | Screen recording permissions |
 
-## Why mac-use?
+## You spend hours clicking through apps that don't talk to each other
 
-**Your desktop job is full of repetitive tasks that shouldn't require a human.**
+You know the drill. Copy from this app, paste into that one. Click through 14 screens to submit a form. Export to CSV -- oh wait, there's no export. Do it again tomorrow.
 
-An office worker [automated their admin work and it went viral](https://reddit.com/r/BestofRedditorUpdates/comments/1s23k0o/facing_disciplinary_investigation_sack_for/) (2,300+ upvotes) -- because everyone recognized the pain. Filling forms, copying data between apps, clicking through the same screens dozens of times a day. In healthcare, this problem is so severe it has a name: ["Death by 1,000 Clicks"](https://reddit.com/r/programming/comments/bcr3g5/bad_software_can_kill_death_by_1000_clicks_where/) (1,900+ upvotes on r/programming) -- doctors spending more time clicking through EHR software than treating patients, with bad UI literally causing medical errors.
+An office worker [automated their admin work and it went viral](https://reddit.com/r/BestofRedditorUpdates/comments/1s23k0o/facing_disciplinary_investigation_sack_for/) (2,300+ upvotes) -- not because it was technically impressive, but because *everyone recognized the pain*. In healthcare, the problem is so bad it has a name: ["Death by 1,000 Clicks"](https://reddit.com/r/programming/comments/bcr3g5/bad_software_can_kill_death_by_1000_clicks_where/) (1,900+ upvotes) -- doctors spending more time navigating EHR software than treating patients, with UI fatigue literally causing medical errors.
 
 These apps have no API. No CLI. No export. Just a GUI that someone has to sit in front of and click through. Until now.
 
