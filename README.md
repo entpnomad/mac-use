@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-**Control any macOS app from Claude Code via Accessibility APIs**
+**Automate your desktop job. Let AI click, type, and read any macOS app.**
 
 ---
 
