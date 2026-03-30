@@ -48,6 +48,15 @@ def _escape_applescript_string(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
+def _set_clipboard(text: str) -> None:
+    """Set the macOS clipboard to the given text via pbcopy."""
+    subprocess.run(
+        ["pbcopy"],
+        input=text.encode("utf-8"),
+        timeout=5,
+    )
+
+
 def _activate_block(app_name: str) -> str:
     """Return AppleScript to activate an app, skipping if already frontmost."""
     global _last_frontmost_app
@@ -375,6 +384,10 @@ def type_text(app_name: str, text: str, field_name: str = "") -> str:
 
     if field_name:
         escaped_field = _escape_applescript_string(field_name)
+
+        # Pre-set clipboard for paste fallback (works for Java Swing)
+        _set_clipboard(text)
+
         script = f'''
 on findField(parentElem, searchName, depth)
     if depth > 8 then return missing value
@@ -413,29 +426,63 @@ tell application "System Events"
         if targetField is missing value then
             return "ERROR: No text field found matching: {escaped_field}"
         end if
-        -- Try set value first (fastest, no delays needed), fall back to keystroke
+        -- Tier 1: set value directly (fastest, works for most native fields)
         try
             set focused of targetField to true
             set value of targetField to "{escaped_text}"
-            return "Typed text into field: {escaped_field}"
-        on error
+            -- Verify value was actually set (Java Swing silently ignores)
+            delay 0.1
+            set currentVal to ""
             try
-                perform action "AXPress" of targetField
-                delay 0.1
-                keystroke "a" using command down
-                key code 51
-                delay 0.05
-                keystroke "{escaped_text}"
-                return "Typed text into field: {escaped_field}"
-            on error
-                set focused of targetField to true
-                delay 0.1
-                keystroke "a" using command down
-                key code 51
-                delay 0.05
-                keystroke "{escaped_text}"
-                return "Typed text into field (keystroke): {escaped_field}"
+                set currentVal to value of targetField as text
             end try
+            if currentVal is "{escaped_text}" then
+                return "Typed text into field: {escaped_field}"
+            end if
+        end try
+        -- Tier 2: focus + keystroke with longer delay (works for Java Swing)
+        try
+            set focused of targetField to true
+            delay 0.5
+            keystroke "a" using command down
+            delay 0.05
+            key code 51
+            delay 0.1
+            keystroke "{escaped_text}"
+            delay 0.3
+            set currentVal to ""
+            try
+                set currentVal to value of targetField as text
+            end try
+            if currentVal is not "" then
+                return "Typed text into field: {escaped_field}"
+            end if
+        end try
+        -- Tier 3: focus + clipboard paste (Cmd+V)
+        try
+            set focused of targetField to true
+            delay 0.5
+            keystroke "a" using command down
+            delay 0.05
+            keystroke "v" using command down
+            delay 0.3
+            return "Typed text into field (paste): {escaped_field}"
+        end try
+        -- Tier 4: cliclick at field coordinates + clipboard paste
+        try
+            set fieldPos to position of targetField
+            set fieldSize to size of targetField
+            set clickX to (item 1 of fieldPos) + ((item 1 of fieldSize) / 2) as integer
+            set clickY to (item 2 of fieldPos) + ((item 2 of fieldSize) / 2) as integer
+            do shell script "cliclick c:" & clickX & "," & clickY
+            delay 0.5
+            keystroke "a" using command down
+            delay 0.05
+            keystroke "v" using command down
+            delay 0.3
+            return "Typed text into field (click+paste): {escaped_field}"
+        on error errMsg
+            return "ERROR: All typing methods failed for: {escaped_field} - " & errMsg
         end try
     end tell
 end tell
@@ -853,9 +900,11 @@ def fill_form(app_name: str, fields: dict[str, str], window_index: int = 1) -> s
     # Build parallel lists for field names and values
     field_names_as = "{"
     field_values_as = "{"
+    ordered_values = []
     for i, (field_name, field_value) in enumerate(fields.items()):
         escaped_name = _escape_applescript_string(field_name)
         escaped_value = _escape_applescript_string(field_value)
+        ordered_values.append(field_value)
         if i > 0:
             field_names_as += ", "
             field_values_as += ", "
@@ -865,6 +914,7 @@ def fill_form(app_name: str, fields: dict[str, str], window_index: int = 1) -> s
     field_values_as += "}"
 
     # Single tree walk: collect all matching fields, then fill them
+    # Uses a multi-tier fallback: set value → keystroke → clipboard paste → cliclick+paste
     script = f'''
 on collectFields(parentElem, fieldNames, depth, resultList)
     if depth > 8 then return resultList
@@ -898,6 +948,68 @@ on collectFields(parentElem, fieldNames, depth, resultList)
     return resultList
 end collectFields
 
+on fillOneField(elem, targetValue, targetName)
+    -- Tier 1: set value directly (fastest, works for most native fields)
+    try
+        set focused of elem to true
+        set value of elem to targetValue
+        delay 0.1
+        set currentVal to ""
+        try
+            set currentVal to value of elem as text
+        end try
+        if currentVal is targetValue then
+            return "OK: " & targetName
+        end if
+    end try
+    -- Tier 2: focus + keystroke with longer delay (works for Java Swing)
+    try
+        set focused of elem to true
+        delay 0.5
+        keystroke "a" using command down
+        delay 0.05
+        key code 51
+        delay 0.1
+        keystroke targetValue
+        delay 0.3
+        set currentVal to ""
+        try
+            set currentVal to value of elem as text
+        end try
+        if currentVal is not "" then
+            return "OK: " & targetName
+        end if
+    end try
+    -- Tier 3: focus + clipboard paste (Cmd+V)
+    try
+        do shell script "echo -n " & quoted form of targetValue & " | pbcopy"
+        set focused of elem to true
+        delay 0.5
+        keystroke "a" using command down
+        delay 0.05
+        keystroke "v" using command down
+        delay 0.3
+        return "OK: " & targetName
+    end try
+    -- Tier 4: cliclick at coordinates + clipboard paste
+    try
+        do shell script "echo -n " & quoted form of targetValue & " | pbcopy"
+        set fieldPos to position of elem
+        set fieldSize to size of elem
+        set clickX to (item 1 of fieldPos) + ((item 1 of fieldSize) / 2) as integer
+        set clickY to (item 2 of fieldPos) + ((item 2 of fieldSize) / 2) as integer
+        do shell script "cliclick c:" & clickX & "," & clickY
+        delay 0.5
+        keystroke "a" using command down
+        delay 0.05
+        keystroke "v" using command down
+        delay 0.3
+        return "OK: " & targetName
+    on error errMsg
+        return "FAIL: " & targetName & " - " & errMsg
+    end try
+end fillOneField
+
 tell application "System Events"
     tell process "{escaped_app}"
 {activate}        set win to window {window_index}
@@ -917,26 +1029,13 @@ tell application "System Events"
             set idx to item 2 of pair
             set targetValue to item idx of fieldValues
             set targetName to item idx of fieldNames
-            try
-                set focused of elem to true
-                set value of elem to targetValue
+            set result to my fillOneField(elem, targetValue, targetName)
+            if result starts with "OK:" then
                 set successCount to successCount + 1
-                set output to output & "OK: " & targetName & "\\n"
-            on error
-                try
-                    perform action "AXPress" of elem
-                    delay 0.05
-                    keystroke "a" using command down
-                    key code 51
-                    delay 0.05
-                    keystroke targetValue
-                    set successCount to successCount + 1
-                    set output to output & "OK: " & targetName & "\\n"
-                on error errMsg
-                    set failCount to failCount + 1
-                    set output to output & "FAIL: " & targetName & " - " & errMsg & "\\n"
-                end try
-            end try
+            else
+                set failCount to failCount + 1
+            end if
+            set output to output & result & "\\n"
             set end of foundIndices to idx
         end repeat
 
